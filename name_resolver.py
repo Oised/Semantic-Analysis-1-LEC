@@ -27,6 +27,8 @@ from symbols import FunctionSymbol, Scope, Symbol, SymbolKind
 
 
 class NameResolver:
+    """Associa identificadores do programa às suas declarações."""
+
     def __init__(self, program: Program) -> None:
         self.program = program
         self.functions: dict[str, FunctionSymbol] = {}
@@ -38,26 +40,24 @@ class NameResolver:
         message: str,
         node: Node,
     ) -> None:
+        """Registra um erro semântico ligado ao trecho de código informado."""
         self.diagnostics.append(
             SemanticDiagnostic(kind=kind, message=message, span=node.span)
         )
 
     def resolve(self) -> None:
+        """Declara funções, prepara escopos e resolve os corpos do programa."""
+        # Registrar todas as funções primeiro permite chamadas antes da definição.
         for function in self.program.functions:
             self.declare_function(function)
 
         self.validate_main()
 
         for function in self.program.functions:
+            # Parâmetros pertencem ao escopo externo do corpo da função.
+            # Tipos void são validados na verificação de tipos (Seção 5.1).
             scope = Scope(parent=None)
             for parameter in function.parameters:
-                if parameter.type is TypeName.VOID:
-                    self.error(
-                        SemanticErrorKind.VOID_PARAMETER,
-                        "parâmetro não pode ter tipo void",
-                        parameter,
-                    )
-
                 symbol = Symbol(
                     name=parameter.name,
                     kind=SymbolKind.PARAMETER,
@@ -73,6 +73,7 @@ class NameResolver:
             raise SemanticError(self.diagnostics)
 
     def declare_function(self, function: FunctionDecl) -> None:
+        """Cria o símbolo global da função ou diagnostica uma duplicata."""
         symbol = FunctionSymbol(
             name=function.name,
             kind=SymbolKind.FUNCTION,
@@ -93,6 +94,7 @@ class NameResolver:
         function.metadata["symbol"] = symbol
 
     def validate_main(self) -> None:
+        """Verifica se existe uma função main sem parâmetros que retorna int."""
         main = self.functions.get("main")
         if main is None:
             self.error(
@@ -108,6 +110,7 @@ class NameResolver:
             )
 
     def declare(self, symbol: Symbol, scope: Scope) -> bool:
+        """Insere um símbolo no escopo, rejeitando nomes já declarados nele."""
         if symbol.name in scope.symbols:
             self.error(
                 SemanticErrorKind.DUPLICATE_DECLARATION,
@@ -120,19 +123,15 @@ class NameResolver:
         return True
 
     def resolve_block(self, block: Block, scope: Scope) -> None:
+        """Registra o escopo do bloco e resolve suas instruções em ordem."""
         block.metadata["scope"] = scope
         for statement in block.statements:
             self.resolve_statement(statement, scope)
 
     def resolve_statement(self, statement: Stmt, scope: Scope) -> None:
+        """Resolve nomes da instrução e cria escopos para blocos aninhados."""
         if isinstance(statement, VarDecl):
-            if statement.type is TypeName.VOID:
-                self.error(
-                    SemanticErrorKind.VOID_VARIABLE,
-                    "variável não pode ter tipo void",
-                    statement,
-                )
-
+            # Tipos void são validados na verificação de tipos (Seção 5.1).
             symbol = Symbol(
                 name=statement.name,
                 kind=SymbolKind.VARIABLE,
@@ -180,6 +179,7 @@ class NameResolver:
             )
 
     def resolve_identifier(self, expression: IdentifierExpr, scope: Scope) -> None:
+        """Procura a variável no escopo atual e, depois, nos escopos externos."""
         current: Scope | None = scope
         while current is not None:
             symbol = current.symbols.get(expression.name)
@@ -195,6 +195,7 @@ class NameResolver:
         )
 
     def resolve_expr(self, expression: Expr, scope: Scope) -> None:
+        """Resolve identificadores e chamadas, percorrendo expressões compostas."""
         if isinstance(expression, IdentifierExpr):
             self.resolve_identifier(expression, scope)
         elif isinstance(expression, CallExpr):
